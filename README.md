@@ -34,8 +34,9 @@ kindly refer to these links:-
 
     # Install git and clone TuxLite
     aptitude install git
-    git clone https://github.com/Mins/TuxLite.git
-    cd TuxLite
+    #git clone https://github.com/Mins/TuxLite.git
+    git clone https://github.com/brennebeck/TuxLite.git tuxlite
+    cd tuxlite
     
     # Edit options to enter server IP, MySQL password etc.
     nano options.conf
