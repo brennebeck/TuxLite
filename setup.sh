@@ -47,9 +47,12 @@ function basic_server_setup {
     sed -i 's/^net.ipv4.conf.all.accept_source_route = 1/net.ipv4.conf.all.accept_source_route = 0/' /etc/sysctl.conf
     sed -i 's/^#net.ipv6.conf.all.accept_source_route = 0/net.ipv6.conf.all.accept_source_route = 0/' /etc/sysctl.conf
     sed -i 's/^net.ipv6.conf.all.accept_source_route = 1/net.ipv6.conf.all.accept_source_route = 0/' /etc/sysctl.conf
-
-    echo -e "\033[35;1m Root login disabled, SSH port set to $SSHD_PORT. Hostname set to $HOSTNAME and FQDN to $HOSTNAME_FQDN. \033[0m"
-    echo -e "\033[35;1m Remember to create a normal user account for login or you will be locked out from your box! \033[0m"
+	if  [ $ROOT_LOGIN = "no" ]; then
+	    echo -e "\033[35;1m Root login disabled, SSH port set to $SSHD_PORT. Hostname set to $HOSTNAME and FQDN to $HOSTNAME_FQDN. \033[0m"
+	    echo -e "\033[35;1m Remember to create a normal user account for login or you will be locked out from your box! \033[0m"
+	else
+		echo -e "\033[35;1m Root login active, SSH port set to $SSHD_PORT. Hostname set to $HOSTNAME and FQDN to $HOSTNAME_FQDN. \033[0m"
+	fi
 
 } # End function basic_server_setup
 
@@ -130,7 +133,7 @@ EOF
 
         # Set APT pinning for Nginx package
         cat > /etc/apt/preferences.d/Nginx <<EOF
-# Prevent potential conflict with main repo/dotdeb 
+# Prevent potential conflict with main repo/dotdeb
 # Always install from official nginx.org repo
 Package: nginx
 Pin: origin nginx.org
@@ -143,7 +146,7 @@ EOF
 
 
     # If user wants to install MariaDB instead of MySQL
-    if [ $INSTALL_MARIADB = 'yes' ]; then
+    if [ $DBSERVER = 2 ]; then
         echo -e "\033[35;1mEnabling MariaDB.org repo for $DISTRO $RELEASE. \033[0m"
         cat > /etc/apt/sources.list.d/MariaDB.list <<EOF
 # http://mariadb.org/mariadb/repositories/
@@ -164,7 +167,33 @@ EOF
 
         # Import MariaDB signing key
         apt-key adv --recv-keys --keyserver keyserver.ubuntu.com 0xcbcb082a1bb943db
-    fi # End if INSTALL_MARIADB = yes
+    fi # End if user wants to install MariaDB
+
+    # If user wants to install Percona instead of MySQL
+    if [ $DBSERVER = 3 ]; then
+        echo -e "\033[35;1mEnabling Percona.com repo for $DISTRO $RELEASE. \033[0m"
+        cat > /etc/apt/sources.list.d/Percona.list <<EOF
+# Percona 5.6 repository list
+# http://www.percona.com/doc/percona-server/5.6/installation/apt_repo.html
+deb http://repo.percona.com/apt $RELEASE main
+deb-src http://repo.percona.com/apt $RELEASE main
+
+EOF
+
+        # Set APT pinning for Percona packages
+        cat > /etc/apt/preferences.d/Percona <<EOF
+# Prevent potential conflict with main repo that causes
+# Percona to be uninstalled when upgrading mysql-common
+Package: *
+Pin: release o=Percona Development Team
+Pin-Priority: 1001
+
+EOF
+
+        # Import Percona signing key
+        apt-key adv --keyserver keys.gnupg.net --recv-keys 1C4CBDCDCD2EFD2A
+    fi # End if user wants to install Percona
+
 
     aptitude update
     echo -e "\033[35;1m Successfully configured /etc/apt/sources.list \033[0m"
@@ -194,6 +223,21 @@ function install_webserver {
 
         # Change default vhost root directory to /usr/share/nginx/html;
         sed -i 's/\(root \/usr\/share\/nginx\/\).*/\1html;/' /etc/nginx/sites-available/default
+
+        # Create common SSL config file
+        cat > /etc/nginx/ssl.conf <<EOF
+ssl on;
+ssl_certificate /etc/ssl/localcerts/webserver.pem;
+ssl_certificate_key /etc/ssl/localcerts/webserver.key;
+
+ssl_session_cache shared:SSL:10m;
+ssl_session_timeout 10m;
+
+ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
+ssl_ciphers HIGH:!aNULL:!MD5;
+ssl_prefer_server_ciphers on;
+EOF
+
     else
         aptitude -y install libapache2-mod-fastcgi apache2-mpm-event
 
@@ -237,11 +281,18 @@ function install_extras {
 
 function install_mysql {
 
-    echo "mysql-server mysql-server/root_password password $MYSQL_ROOT_PASSWORD" | debconf-set-selections
-    echo "mysql-server mysql-server/root_password_again password $MYSQL_ROOT_PASSWORD" | debconf-set-selections
+    if [ $DBSERVER = 3 ]; then
+        echo "percona-server-server-5.6 percona-server-server/root_password password $MYSQL_ROOT_PASSWORD" | debconf-set-selections
+        echo "percona-server-server-5.6 percona-server-server/root_password_again password $MYSQL_ROOT_PASSWORD" | debconf-set-selections
+    else
+        echo "mysql-server mysql-server/root_password password $MYSQL_ROOT_PASSWORD" | debconf-set-selections
+        echo "mysql-server mysql-server/root_password_again password $MYSQL_ROOT_PASSWORD" | debconf-set-selections
+    fi
 
-    if [ $INSTALL_MARIADB = 'yes' ]; then
+    if [ $DBSERVER = 2 ]; then
         aptitude -y install mariadb-server mariadb-client
+    elif [ $DBSERVER = 3 ]; then
+        aptitude -y install percona-server-server-5.6 percona-server-client-5.6
     else
         aptitude -y install mysql-server mysql-client
     fi
